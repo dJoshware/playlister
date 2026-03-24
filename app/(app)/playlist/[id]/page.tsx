@@ -4,7 +4,15 @@ import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import Image from "next/image";
 import { Button } from "@/components/ui/button";
-import { ArrowLeft, Pencil, Trash2, Plus, Music, Loader2 } from "lucide-react";
+import {
+    ArrowLeft,
+    Pencil,
+    Trash2,
+    Plus,
+    Music,
+    Loader2,
+    ArrowUp,
+} from "lucide-react";
 import * as Dialog from "@radix-ui/react-dialog";
 import * as VisuallyHidden from "@radix-ui/react-visually-hidden";
 import type { SpotifyTrack } from "@/types";
@@ -20,6 +28,7 @@ export default function PlaylistPage() {
     const [deleteOpen, setDeleteOpen] = useState(false);
     const [deleting, setDeleting] = useState(false);
     const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+    const [showBackToTop, setShowBackToTop] = useState(false);
 
     useEffect(() => {
         Promise.all([
@@ -32,6 +41,12 @@ export default function PlaylistPage() {
             })
             .finally(() => setLoading(false));
     }, [id]);
+
+    useEffect(() => {
+        const handleScroll = () => setShowBackToTop(window.scrollY > 400);
+        window.addEventListener("scroll", handleScroll, { passive: true });
+        return () => window.removeEventListener("scroll", handleScroll);
+    }, []);
 
     async function handleDelete() {
         setDeleting(true);
@@ -58,7 +73,7 @@ export default function PlaylistPage() {
     const coverUrl = playlist?.images?.[0]?.url;
 
     return (
-        <div className='space-y-6'>
+        <div className='space-y-6 pb-16'>
             <Button
                 asChild
                 variant='ghost'
@@ -190,6 +205,18 @@ export default function PlaylistPage() {
                         </div>
                     ))}
                 </div>
+            )}
+
+            {/* Back to top */}
+            {showBackToTop && (
+                <button
+                    onClick={() =>
+                        window.scrollTo({ top: 0, behavior: "smooth" })
+                    }
+                    className='fixed bottom-6 right-6 z-40 flex items-center gap-1.5 bg-card border border-border rounded-full px-3 py-2 text-xs font-medium text-muted-foreground hover:text-foreground shadow-lg transition-colors'>
+                    <ArrowUp className='w-3.5 h-3.5' />
+                    Top
+                </button>
             )}
 
             {/* Delete dialog */}
