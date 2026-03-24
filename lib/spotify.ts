@@ -15,8 +15,6 @@ export const SCOPE = [
     'ugc-image-upload',
 ].join(' ');
 
-// ─── Token helpers ────────────────────────────────────────────────────────────
-
 export function getAuthHeader() {
     return (
         'Basic ' +
@@ -35,20 +33,9 @@ export async function getTokens(): Promise<TokenData | null> {
     }
 }
 
-export async function getValidAccessToken(): Promise<string> {
-    const tokens = await getTokens();
-    if (!tokens) redirect('/login');
-    if (Date.now() > tokens.expires_at - 60_000) {
-        const refreshed = await refreshAccessToken(tokens.refresh_token);
-        if (!refreshed) redirect('/login');
-        return refreshed;
-    }
-    return tokens.access_token;
-}
-
-async function refreshAccessToken(
+async function fetchRefreshedToken(
     refreshToken: string,
-): Promise<string | null> {
+): Promise<TokenData | null> {
     const res = await fetch('https://accounts.spotify.com/api/token', {
         method: 'POST',
         headers: {
@@ -62,23 +49,41 @@ async function refreshAccessToken(
     });
     if (!res.ok) return null;
     const data = await res.json();
-    const cookieStore = await cookies();
-    cookieStore.set(
-        'spotify_tokens',
-        JSON.stringify({
-            access_token: data.access_token,
-            refresh_token: data.refresh_token ?? refreshToken,
-            expires_at: Date.now() + data.expires_in * 1000,
-        }),
-        {
-            httpOnly: true,
-            secure: process.env.NODE_ENV === 'production',
-            sameSite: 'lax',
-            maxAge: 60 * 60 * 24 * 30,
-            path: '/',
-        },
-    );
-    return data.access_token;
+    return {
+        access_token: data.access_token,
+        refresh_token: data.refresh_token ?? refreshToken,
+        expires_at: Date.now() + data.expires_in * 1000,
+    };
+}
+
+/**
+ * Use this in Route Handlers only — it refreshes the token AND writes
+ * the updated token back to the cookie (which requires a Route Handler context).
+ */
+export async function getValidAccessToken(): Promise<string> {
+    const tokens = await getTokens();
+    if (!tokens) redirect('/login');
+    if (Date.now() > tokens.expires_at - 60_000) {
+        const newTokens = await fetchRefreshedToken(tokens.refresh_token);
+        if (!newTokens) redirect('/login');
+        // Only set cookies in Route Handler context — this is safe here
+        // because getValidAccessToken is called from API routes.
+        try {
+            const cookieStore = await cookies();
+            cookieStore.set('spotify_tokens', JSON.stringify(newTokens), {
+                httpOnly: true,
+                secure: process.env.NODE_ENV === 'production',
+                sameSite: 'lax',
+                maxAge: 60 * 60 * 24 * 30,
+                path: '/',
+            });
+        } catch {
+            // In Server Component context (layout), cookie setting will fail —
+            // that's okay, we still return the new access token for this request.
+        }
+        return newTokens.access_token;
+    }
+    return tokens.access_token;
 }
 
 // ─── Fetch helper ─────────────────────────────────────────────────────────────
