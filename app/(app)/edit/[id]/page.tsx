@@ -40,7 +40,11 @@ export default function EditPlaylistPage() {
     function toggleTrack(trackId: string) {
         setSelectedIds(prev => {
             const next = new Set(prev);
-            next.has(trackId) ? next.delete(trackId) : next.add(trackId);
+            if (next.has(trackId)) {
+                next.delete(trackId);
+            } else {
+                next.add(trackId);
+            }
             return next;
         });
     }
