@@ -220,8 +220,7 @@ export async function searchArtistAlbums(
         t,
     );
     const artist = artistSearch?.artists?.items?.[0];
-    if (!artist || artist.name.toLowerCase() !== query.toLowerCase())
-        throw new Error('ARTIST_NOT_FOUND');
+    if (!artist) throw new Error('ARTIST_NOT_FOUND');
 
     const all: SpotifyAlbum[] = [];
     let offset = 0;
