@@ -13,8 +13,16 @@ import {
     Loader2,
     CheckCircle2,
     Music,
+    X,
 } from "lucide-react";
 import type { SpotifyAlbum, SpotifySong } from "@/types";
+
+interface Artist {
+    id: string;
+    name: string;
+    image: string;
+    followers: string;
+}
 
 type AlbumWithSongs = SpotifyAlbum & {
     songs: SpotifySong[];
@@ -24,8 +32,11 @@ type AlbumWithSongs = SpotifyAlbum & {
 export default function SearchPage() {
     const { id: playlistId } = useParams<{ id: string }>();
     const [query, setQuery] = useState("");
+    const [artists, setArtists] = useState<Artist[]>([]);
+    const [selectedArtist, setSelectedArtist] = useState<Artist | null>(null);
     const [albums, setAlbums] = useState<AlbumWithSongs[]>([]);
     const [searching, setSearching] = useState(false);
+    const [loadingAlbums, setLoadingAlbums] = useState(false);
     const [searchError, setSearchError] = useState("");
     const [expandedAlbumId, setExpandedAlbumId] = useState<string | null>(null);
     const [loadingSongs, setLoadingSongs] = useState<string | null>(null);
@@ -39,19 +50,43 @@ export default function SearchPage() {
             .then(d => setPlaylistName(d.playlist?.name ?? ""));
     }, [playlistId]);
 
-    async function handleSearch(e: React.SubmitEvent<HTMLFormElement>) {
+    async function handleSearch(e: React.FormEvent<HTMLFormElement>) {
         e.preventDefault();
         const q = query.trim();
         if (!q) return;
         setSearching(true);
         setSearchError("");
+        setArtists([]);
+        setSelectedArtist(null);
         setAlbums([]);
-        setExpandedAlbumId(null);
         try {
-            const res = await fetch(`/api/search?q=${encodeURIComponent(q)}`);
+            const res = await fetch(
+                `/api/search?artists=true&q=${encodeURIComponent(q)}`,
+            );
             const data = await res.json();
             if (!res.ok) {
                 setSearchError(data.error ?? "Search failed.");
+                return;
+            }
+            setArtists(data.artists ?? []);
+            if ((data.artists ?? []).length === 0) {
+                setSearchError("No artists found. Try a different name.");
+            }
+        } finally {
+            setSearching(false);
+        }
+    }
+
+    async function selectArtist(artist: Artist) {
+        setSelectedArtist(artist);
+        setAlbums([]);
+        setExpandedAlbumId(null);
+        setLoadingAlbums(true);
+        try {
+            const res = await fetch(`/api/search?artistId=${artist.id}`);
+            const data = await res.json();
+            if (!res.ok) {
+                setSearchError(data.error ?? "Failed to load albums.");
                 return;
             }
             setAlbums(
@@ -62,8 +97,14 @@ export default function SearchPage() {
                 })),
             );
         } finally {
-            setSearching(false);
+            setLoadingAlbums(false);
         }
+    }
+
+    function clearArtist() {
+        setSelectedArtist(null);
+        setAlbums([]);
+        setExpandedAlbumId(null);
     }
 
     async function toggleAlbum(albumId: string) {
@@ -145,7 +186,8 @@ export default function SearchPage() {
     }
 
     return (
-        <div className='max-w-2xl mx-auto space-y-6'>
+        <div className='max-w-2xl mx-auto space-y-6 pb-12'>
+            {/* Header */}
             <div className='flex items-center gap-3'>
                 <Button
                     asChild
@@ -167,6 +209,7 @@ export default function SearchPage() {
                 </div>
             </div>
 
+            {/* Search bar */}
             <form
                 onSubmit={handleSearch}
                 className='flex gap-2'>
@@ -174,7 +217,15 @@ export default function SearchPage() {
                     <Search className='absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none' />
                     <input
                         value={query}
-                        onChange={e => setQuery(e.target.value)}
+                        onChange={e => {
+                            setQuery(e.target.value);
+                            if (!e.target.value) {
+                                setArtists([]);
+                                setSelectedArtist(null);
+                                setAlbums([]);
+                                setSearchError("");
+                            }
+                        }}
                         placeholder='Search for an artist…'
                         autoComplete='off'
                         className='flex h-10 w-full rounded-md border border-input bg-transparent pl-9 pr-3 py-2 text-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring'
@@ -195,18 +246,106 @@ export default function SearchPage() {
                 <p className='text-sm text-destructive'>{searchError}</p>
             )}
 
-            {albums.length === 0 && !searching && !searchError && (
+            {/* Tip */}
+            {artists.length === 0 && !searching && !searchError && (
                 <div className='rounded-lg border border-border/50 bg-muted/30 px-4 py-3 text-sm text-muted-foreground space-y-1'>
                     <p className='font-medium text-foreground'>How to use</p>
-                    <p>1. Type an artist&apos;s full name and hit Search.</p>
+                    <p>1. Search for an artist by name.</p>
+                    <p>2. Pick the right artist from the results.</p>
                     <p>
-                        2. Expand an album to browse songs, or add a whole album
+                        3. Expand an album to browse songs, or add a whole album
                         at once with <Plus className='inline w-3 h-3' />.
                     </p>
                 </div>
             )}
 
-            {albums.length > 0 && (
+            {/* Artist results */}
+            {!selectedArtist && artists.length > 0 && (
+                <div className='space-y-2'>
+                    <p className='text-xs text-muted-foreground uppercase tracking-wider px-1'>
+                        Select an artist
+                    </p>
+                    {artists.map(artist => (
+                        <button
+                            key={artist.id}
+                            onClick={() => selectArtist(artist)}
+                            className='w-full flex items-center gap-3 p-3 rounded-lg border border-border/50 bg-card hover:bg-muted/50 transition-colors text-left'>
+                            <div className='relative w-12 h-12 shrink-0 rounded-full overflow-hidden bg-muted'>
+                                {artist.image ? (
+                                    <Image
+                                        src={artist.image}
+                                        alt={artist.name}
+                                        fill
+                                        className='object-cover'
+                                        sizes='48px'
+                                    />
+                                ) : (
+                                    <div className='w-full h-full flex items-center justify-center'>
+                                        <Music className='w-5 h-5 text-muted-foreground' />
+                                    </div>
+                                )}
+                            </div>
+                            <div className='min-w-0'>
+                                <p className='text-sm font-medium truncate'>
+                                    {artist.name}
+                                </p>
+                                {artist.followers && (
+                                    <p className='text-xs text-muted-foreground'>
+                                        {artist.followers} followers
+                                    </p>
+                                )}
+                            </div>
+                        </button>
+                    ))}
+                </div>
+            )}
+
+            {/* Selected artist header */}
+            {selectedArtist && (
+                <div className='flex items-center gap-3 p-3 rounded-lg border border-primary/30 bg-primary/5'>
+                    <div className='relative w-10 h-10 shrink-0 rounded-full overflow-hidden bg-muted'>
+                        {selectedArtist.image ? (
+                            <Image
+                                src={selectedArtist.image}
+                                alt={selectedArtist.name}
+                                fill
+                                className='object-cover'
+                                sizes='40px'
+                            />
+                        ) : (
+                            <div className='w-full h-full flex items-center justify-center'>
+                                <Music className='w-4 h-4 text-muted-foreground' />
+                            </div>
+                        )}
+                    </div>
+                    <div className='flex-1 min-w-0'>
+                        <p className='text-sm font-semibold truncate'>
+                            {selectedArtist.name}
+                        </p>
+                        <p className='text-xs text-muted-foreground'>
+                            {loadingAlbums
+                                ? "Loading catalog…"
+                                : `${albums.length} releases`}
+                        </p>
+                    </div>
+                    <button
+                        onClick={clearArtist}
+                        className='shrink-0 text-muted-foreground hover:text-foreground transition-colors'
+                        title='Change artist'>
+                        <X className='w-4 h-4' />
+                    </button>
+                </div>
+            )}
+
+            {/* Loading albums */}
+            {loadingAlbums && (
+                <div className='flex justify-center py-8'>
+                    <Loader2 className='w-5 h-5 animate-spin text-muted-foreground' />
+                </div>
+            )}
+
+            {/* Album list */}
+            {!loadingAlbums && albums.length > 0 && (
                 <div className='space-y-2'>
                     {albums.map(album => {
                         const isExpanded = expandedAlbumId === album.album_id;
@@ -241,7 +380,7 @@ export default function SearchPage() {
                                         onClick={() =>
                                             toggleAlbum(album.album_id)
                                         }>
-                                        <p className='text-sm font-medium truncate'>
+                                        <p className='text-sm font-medium leading-snug break-words'>
                                             {album.album_name}
                                         </p>
                                         <div className='flex items-center gap-2 mt-0.5'>
@@ -323,7 +462,7 @@ export default function SearchPage() {
                                                                     />
                                                                 )}
                                                             </div>
-                                                            <span className='flex-1 text-sm truncate'>
+                                                            <span className='flex-1 text-sm break-words leading-snug'>
                                                                 {song.song_name}
                                                             </span>
                                                             <button

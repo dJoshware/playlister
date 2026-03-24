@@ -1,36 +1,44 @@
 import { NextResponse } from 'next/server';
 import {
     getValidAccessToken,
-    searchArtistAlbums,
+    searchArtists,
+    getArtistAlbums,
     getAlbumTracks,
 } from '@/lib/spotify';
 
 export async function GET(request: Request) {
     const { searchParams } = new URL(request.url);
     const query = searchParams.get('q');
+    const artistsMode = searchParams.get('artists') === 'true';
+    const artistId = searchParams.get('artistId');
     const albumId = searchParams.get('albumId');
+
     try {
         const token = await getValidAccessToken();
+
+        // Get tracks for a specific album
         if (albumId) {
             const songs = await getAlbumTracks(token, albumId);
             return NextResponse.json({ songs });
         }
-        if (!query)
-            return NextResponse.json(
-                { error: 'Missing query' },
-                { status: 400 },
-            );
-        const albums = await searchArtistAlbums(token, query);
-        return NextResponse.json({ albums });
+
+        // Get albums for a specific artist (by ID)
+        if (artistId) {
+            const albums = await getArtistAlbums(token, artistId);
+            return NextResponse.json({ albums });
+        }
+
+        // Search for multiple matching artists
+        if (artistsMode && query) {
+            const artists = await searchArtists(token, query);
+            return NextResponse.json({ artists });
+        }
+
+        return NextResponse.json(
+            { error: 'Missing query parameters' },
+            { status: 400 },
+        );
     } catch (err) {
-        const msg = String(err);
-        if (msg.includes('ARTIST_NOT_FOUND'))
-            return NextResponse.json(
-                {
-                    error: "Artist not found. Please enter the artist's full name.",
-                },
-                { status: 404 },
-            );
-        return NextResponse.json({ error: msg }, { status: 500 });
+        return NextResponse.json({ error: String(err) }, { status: 500 });
     }
 }

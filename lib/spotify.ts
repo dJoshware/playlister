@@ -211,6 +211,73 @@ export async function getAlbumTracks(t: string, albumId: string) {
     );
 }
 
+export async function searchArtists(t: string, query: string) {
+    const data = await sf(
+        `/search?q=${encodeURIComponent(query)}&type=artist&limit=8`,
+        t,
+    );
+    const items = data?.artists?.items ?? [];
+    return items.map((a: any) => ({
+        id: a.id,
+        name: a.name,
+        image:
+            a.images?.[2]?.url ??
+            a.images?.[1]?.url ??
+            a.images?.[0]?.url ??
+            '',
+        followers: a.followers?.total
+            ? new Intl.NumberFormat().format(a.followers.total)
+            : '',
+    }));
+}
+
+export async function getArtistAlbums(
+    t: string,
+    artistId: string,
+): Promise<SpotifyAlbum[]> {
+    const all: SpotifyAlbum[] = [];
+    let offset = 0;
+    while (true) {
+        const data = await sf(
+            `/artists/${artistId}/albums?include_groups=album,single&limit=50&offset=${offset}`,
+            t,
+        );
+        const items = data?.items ?? [];
+        if (!items.length) break;
+        for (const a of items) {
+            if (a.album_type === 'compilation') continue;
+            const year =
+                a.release_date.length === 4
+                    ? a.release_date
+                    : new Date(a.release_date).getFullYear().toString();
+            all.push({
+                album_name: a.name,
+                album_id: a.id,
+                album_cover_image:
+                    a.images?.[2]?.url ?? a.images?.[0]?.url ?? '',
+                album_type: a.album_type,
+                total_tracks: a.total_tracks,
+                release_date: year,
+                songs: [],
+            });
+        }
+        offset += items.length;
+        if (offset >= 500) break;
+    }
+
+    const map = new Map<string, SpotifyAlbum>();
+    for (const a of all) {
+        const ex = map.get(a.album_name);
+        if (!ex || a.release_date > ex.release_date) map.set(a.album_name, a);
+    }
+
+    return [...map.values()].sort((a, b) => {
+        if (a.album_type !== b.album_type)
+            return a.album_type === 'album' ? -1 : 1;
+        return b.release_date.localeCompare(a.release_date);
+    });
+}
+
 export async function searchArtistAlbums(
     t: string,
     query: string,
