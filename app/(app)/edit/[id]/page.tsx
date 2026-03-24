@@ -75,13 +75,14 @@ export default function EditPlaylistPage() {
                 }),
             });
             if (!res.ok) {
-                const d = await res.json();
+                const text = await res.text();
+                const d = text ? JSON.parse(text) : {};
                 setError(d.error ?? "Save failed.");
                 return;
             }
             router.push(`/playlist/${id}`);
             router.refresh();
-        } catch {
+        } catch (err) {
             setError("Something went wrong.");
         } finally {
             setSaving(false);
