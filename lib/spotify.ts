@@ -1,0 +1,261 @@
+import { cookies } from 'next/headers';
+import { redirect } from 'next/navigation';
+import type { SpotifyAlbum, SpotifyTrack, TokenData } from '@/types';
+
+export const CLIENT_ID = process.env.SPOTIFY_CLIENT_ID!;
+export const CLIENT_SECRET = process.env.SPOTIFY_CLIENT_SECRET!;
+export const REDIRECT_URI = process.env.REDIRECT_URI!;
+
+export const SCOPE = [
+    'user-read-private',
+    'user-read-email',
+    'playlist-read-private',
+    'playlist-modify-private',
+    'playlist-modify-public',
+    'ugc-image-upload',
+].join(' ');
+
+// ─── Token helpers ────────────────────────────────────────────────────────────
+
+export function getAuthHeader() {
+    return (
+        'Basic ' +
+        Buffer.from(`${CLIENT_ID}:${CLIENT_SECRET}`).toString('base64')
+    );
+}
+
+export async function getTokens(): Promise<TokenData | null> {
+    const cookieStore = await cookies();
+    const raw = cookieStore.get('spotify_tokens')?.value;
+    if (!raw) return null;
+    try {
+        return JSON.parse(raw) as TokenData;
+    } catch {
+        return null;
+    }
+}
+
+export async function getValidAccessToken(): Promise<string> {
+    const tokens = await getTokens();
+    if (!tokens) redirect('/login');
+    if (Date.now() > tokens.expires_at - 60_000) {
+        const refreshed = await refreshAccessToken(tokens.refresh_token);
+        if (!refreshed) redirect('/login');
+        return refreshed;
+    }
+    return tokens.access_token;
+}
+
+async function refreshAccessToken(
+    refreshToken: string,
+): Promise<string | null> {
+    const res = await fetch('https://accounts.spotify.com/api/token', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/x-www-form-urlencoded',
+            Authorization: getAuthHeader(),
+        },
+        body: new URLSearchParams({
+            grant_type: 'refresh_token',
+            refresh_token: refreshToken,
+        }),
+    });
+    if (!res.ok) return null;
+    const data = await res.json();
+    const cookieStore = await cookies();
+    cookieStore.set(
+        'spotify_tokens',
+        JSON.stringify({
+            access_token: data.access_token,
+            refresh_token: data.refresh_token ?? refreshToken,
+            expires_at: Date.now() + data.expires_in * 1000,
+        }),
+        {
+            httpOnly: true,
+            secure: process.env.NODE_ENV === 'production',
+            sameSite: 'lax',
+            maxAge: 60 * 60 * 24 * 30,
+            path: '/',
+        },
+    );
+    return data.access_token;
+}
+
+// ─── Fetch helper ─────────────────────────────────────────────────────────────
+
+async function sf(path: string, token: string, options?: RequestInit) {
+    const res = await fetch(`https://api.spotify.com/v1${path}`, {
+        ...options,
+        headers: {
+            Authorization: `Bearer ${token}`,
+            'Content-Type': 'application/json',
+            ...(options?.headers ?? {}),
+        },
+    });
+    if (res.status === 204) return null;
+    if (!res.ok) throw new Error(`Spotify ${res.status}: ${await res.text()}`);
+    return res.json();
+}
+
+// ─── API calls ────────────────────────────────────────────────────────────────
+
+export const getCurrentUser = (t: string) => sf('/me', t);
+export const getUserPlaylists = (t: string) => sf('/me/playlists?limit=50', t);
+export const getPlaylist = (t: string, id: string) => sf(`/playlists/${id}`, t);
+
+export async function getAllPlaylistTracks(
+    t: string,
+    playlistId: string,
+): Promise<SpotifyTrack[]> {
+    const all: SpotifyTrack[] = [];
+    let offset = 0;
+    while (true) {
+        const data = await sf(
+            `/playlists/${playlistId}/tracks?offset=${offset}&limit=100`,
+            t,
+        );
+        const items = data?.items ?? [];
+        if (!items.length) break;
+        for (const item of items) {
+            const track = item.track;
+            if (!track) continue;
+            all.push({
+                track_name: track.name,
+                track_id: track.id,
+                artist_name: track.artists?.[0]?.name ?? 'Unknown',
+                track_album_cover:
+                    track.album?.images?.[2]?.url ??
+                    track.album?.images?.[0]?.url ??
+                    '',
+            });
+        }
+        offset += items.length;
+    }
+    return all;
+}
+
+export async function createPlaylist(
+    t: string,
+    userId: string,
+    name: string,
+    description: string,
+    isPublic: boolean,
+    collaborative: boolean,
+) {
+    return sf(`/users/${userId}/playlists`, t, {
+        method: 'POST',
+        body: JSON.stringify({
+            name,
+            description,
+            public: isPublic,
+            collaborative,
+        }),
+    });
+}
+
+export const updatePlaylist = (
+    t: string,
+    id: string,
+    name: string,
+    description: string,
+) =>
+    sf(`/playlists/${id}`, t, {
+        method: 'PUT',
+        body: JSON.stringify({ name, description }),
+    });
+
+export const deletePlaylist = (t: string, id: string) =>
+    sf(`/playlists/${id}/followers`, t, { method: 'DELETE' });
+
+export async function addTracksToPlaylist(
+    t: string,
+    playlistId: string,
+    trackIds: string[],
+) {
+    const uris = trackIds.map(id => `spotify:track:${id}`);
+    for (let i = 0; i < uris.length; i += 100)
+        await sf(`/playlists/${playlistId}/tracks`, t, {
+            method: 'POST',
+            body: JSON.stringify({ uris: uris.slice(i, i + 100) }),
+        });
+}
+
+export async function removeTracksFromPlaylist(
+    t: string,
+    playlistId: string,
+    trackIds: string[],
+) {
+    const tracks = trackIds.map(id => ({ uri: `spotify:track:${id}` }));
+    for (let i = 0; i < tracks.length; i += 100)
+        await sf(`/playlists/${playlistId}/tracks`, t, {
+            method: 'DELETE',
+            body: JSON.stringify({ tracks: tracks.slice(i, i + 100) }),
+        });
+}
+
+export async function getAlbumTracks(t: string, albumId: string) {
+    const album = await sf(`/albums/${albumId}`, t);
+    const cover = album?.images?.[2]?.url ?? album?.images?.[0]?.url ?? '';
+    return (album?.tracks?.items ?? []).map(
+        (s: { name: string; id: string }) => ({
+            song_image: cover,
+            song_name: s.name,
+            song_id: s.id,
+        }),
+    );
+}
+
+export async function searchArtistAlbums(
+    t: string,
+    query: string,
+): Promise<SpotifyAlbum[]> {
+    const artistSearch = await sf(
+        `/search?q=${encodeURIComponent(query)}&type=artist&limit=1`,
+        t,
+    );
+    const artist = artistSearch?.artists?.items?.[0];
+    if (!artist || artist.name.toLowerCase() !== query.toLowerCase())
+        throw new Error('ARTIST_NOT_FOUND');
+
+    const all: SpotifyAlbum[] = [];
+    let offset = 0;
+    while (true) {
+        const data = await sf(
+            `/artists/${artist.id}/albums?include_groups=album,single&limit=50&offset=${offset}`,
+            t,
+        );
+        const items = data?.items ?? [];
+        if (!items.length) break;
+        for (const a of items) {
+            if (a.album_type === 'compilation') continue;
+            const year =
+                a.release_date.length === 4
+                    ? a.release_date
+                    : new Date(a.release_date).getFullYear().toString();
+            all.push({
+                album_name: a.name,
+                album_id: a.id,
+                album_cover_image:
+                    a.images?.[2]?.url ?? a.images?.[0]?.url ?? '',
+                album_type: a.album_type,
+                total_tracks: a.total_tracks,
+                release_date: year,
+                songs: [],
+            });
+        }
+        offset += items.length;
+        if (offset >= 500) break;
+    }
+
+    const map = new Map<string, SpotifyAlbum>();
+    for (const a of all) {
+        const ex = map.get(a.album_name);
+        if (!ex || a.release_date > ex.release_date) map.set(a.album_name, a);
+    }
+
+    return [...map.values()].sort((a, b) => {
+        if (a.album_type !== b.album_type)
+            return a.album_type === 'album' ? -1 : 1;
+        return b.release_date.localeCompare(a.release_date);
+    });
+}
