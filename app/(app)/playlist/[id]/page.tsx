@@ -4,7 +4,6 @@ import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import Image from "next/image";
 import { Button } from "@/components/ui/button";
-import { Card } from "@/components/ui/card";
 import { ArrowLeft, Pencil, Trash2, Plus, Music, Loader2 } from "lucide-react";
 import * as Dialog from "@radix-ui/react-dialog";
 import * as VisuallyHidden from "@radix-ui/react-visually-hidden";

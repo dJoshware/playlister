@@ -1,7 +1,6 @@
 import Link from "next/link";
 import Image from "next/image";
 import { getCurrentUser, getValidAccessToken } from "@/lib/spotify";
-import { Button } from "@/components/ui/button";
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
 
 export default async function AppLayout({
