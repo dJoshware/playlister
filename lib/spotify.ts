@@ -94,7 +94,8 @@ async function sf(path: string, token: string, options?: RequestInit) {
     });
     if (res.status === 204) return null;
     if (!res.ok) throw new Error(`Spotify ${res.status}: ${await res.text()}`);
-    return res.json();
+    const text = await res.text();
+    return text ? JSON.parse(text) : null;
 }
 
 // ─── API calls ────────────────────────────────────────────────────────────────
