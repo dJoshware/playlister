@@ -1,7 +1,19 @@
 import Link from "next/link";
 import Image from "next/image";
+import { Metadata } from "next";
 import { getCurrentUser, getValidAccessToken } from "@/lib/spotify";
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
+
+export const metadata: Metadata = {
+    title: "Playlister",
+    description: "A smoother way to customize your Spotify playlists.",
+    icons: {
+        apple: [
+            { url: "/playlister-logo-192.png", sizes: "192x192" },
+            { url: "/playlister-logo-512.png", sizes: "512x512" },
+        ],
+    },
+};
 
 export default async function AppLayout({
     children,
